@@ -1,5 +1,35 @@
+Description: >
+  Assignment project 2 on infrastructure as code @udacity
 Parameters:
 
+  EnvironmentName:
+    Description: Environment name
+    Type: String
+
+  VpcCIDR:
+    Description: VPC CIDR notation
+    Type: String
+    Default: 10.0.0.0/16
+
+  PublicSubnet1CIDR:
+    Description: Public subnet in the first Availability Zone
+    Type: String
+    Default: 10.0.0.0/24
+
+  PublicSubnet2CIDR:
+    Description: Public subnet in the second Availability Zone
+    Type: String
+    Default: 10.0.1.0/24
+
+  PrivateSubnet1CIDR:
+    Description: Private subnet in the first Availability Zone
+    Type: String
+    Default: 10.0.2.0/24
+
+  PrivateSubnet2CIDR:
+    Description: Private subnet in the second Availability Zone
+    Type: String
+    Default: 10.0.3.0/24
 Resources:
 
 
