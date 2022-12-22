@@ -246,7 +246,7 @@ Resources:
           apt-get install -y docker-ce
           usermod -aG docker ubuntu
           docker run -p 8080:8080 tomcat:8.0
-      ImageId: ami-0e999cbd62129e3b1
+      ImageId: ami-0e8ad072b97e68af9
       SecurityGroups:
         - Ref: WebServerSecGroup
       InstanceType: t3.medium
