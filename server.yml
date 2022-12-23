@@ -285,6 +285,7 @@ Resources:
           usermod -aG docker ubuntu
           docker run -p 8080:8080 tomcat:8.0
       ImageId: ami-0e8ad072b97e68af9
+      KeyName: udacity
       SecurityGroups:
         - Ref: WebServerSecGroup
       InstanceType: t3.medium
@@ -319,6 +320,7 @@ Resources:
       SecurityGroups:
         - Ref: LBSecGroup
     DependsOn:
+      - VPC
       - LBSecGroup
       - PublicSubnet1 
       - PublicSubnet2
@@ -401,3 +403,7 @@ Outputs:
     Value: !Ref PrivateSubnet2
     Export:
       Name: !Join ['', [!Ref EnvironmentName, '-PRI2-SN']]
+
+  LoadBalancerUrl:
+    Value: !Join ['', ['http://', !GetAtt WebAppLB.DNSName]]
+    Description: URL of the load balancer
