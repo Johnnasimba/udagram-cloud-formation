@@ -360,6 +360,24 @@ Resources:
       UnhealthyThresholdCount: 5
       VpcId: !Ref VPC
     DependsOn: VPC
+  MyBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub my-bucket-${AWS::AccountId}
+      WebsiteConfiguration:
+        IndexDocument: index.html
+  MyBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref MyBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: PublicReadForGetBucketObjects
+            Effect: Allow
+            Principal: "*"
+            Action: "s3:GetObject"
+            Resource: !Join ['', ["arn:aws:s3:::", !Ref MyBucket, "/*"]]
 Outputs:
   VPC:
     Description: A reference to the created VPC
@@ -406,3 +424,6 @@ Outputs:
   LoadBalancerUrl:
     Value: !Join ['', ['http://', !GetAtt WebAppLB.DNSName]]
     Description: URL of the load balancer
+  BucketUrl:
+    Value: !Join ['', ['http://', !GetAtt MyBucket.DomainName]]
+    Description: URL of the S3 bucket
