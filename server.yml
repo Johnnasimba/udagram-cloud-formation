@@ -271,20 +271,13 @@ Resources:
     Properties:
       UserData:
         Fn::Base64: !Sub |
-          #!/bin/bash
-          # Install docker
-          apt-get update
-          apt-get install -y apt-transport-https ca-certificates curl software-properties-common
-          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
-          add-apt-repository \
-          "deb [arch=amd64] https://download.docker.com/linux/ubuntu \
-          $(lsb_release -cs) \
-          stable"
-          apt-get update
-          apt-get install -y docker-ce
-          usermod -aG docker ubuntu
-          docker run -p 8080:8080 tomcat:8.0
-      ImageId: ami-0e8ad072b97e68af9
+          #!/bin/bash -xe
+          yum update -y
+          yum install httpd -y
+          systemctl enable httpd
+          systemctl start httpd
+          echo "<h2>it works! Udagram, Udacity</h2>" > /var/www/html/index.html
+      ImageId: ami-0574da719dca65348
       SecurityGroups:
         - Ref: WebServerSecGroup
       InstanceType: t2.micro
@@ -316,6 +309,13 @@ Resources:
       Subnets:
         - !Ref PublicSubnet1
         - !Ref PublicSubnet2
+      LoadBalancerAttributes:
+      - Key: access_logs.s3.bucket
+        Value: !Sub my-bucket-${AWS::AccountId}
+      - Key: access_logs.s3.prefix
+        Value: logs
+      - Key: access_logs.s3.enabled
+        Value: true
       SecurityGroups:
         - Ref: LBSecGroup
     DependsOn:
@@ -323,6 +323,8 @@ Resources:
       - LBSecGroup
       - PublicSubnet1 
       - PublicSubnet2
+      - MyBucket
+      - MyBucketPolicy
   Listener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
@@ -378,6 +380,18 @@ Resources:
             Principal: "*"
             Action: "s3:GetObject"
             Resource: !Join ['', ["arn:aws:s3:::", !Ref MyBucket, "/*"]]
+          - Sid: AllowLoadBalancerAccess
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: s3:GetObject
+            Resource: !Sub arn:aws:s3:::${MyBucket}/*
+          - Sid: AllowLoadBalancerAccessToLogs
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: s3:PutObject
+            Resource: !Sub arn:aws:s3:::${MyBucket}/AWSLogs/*
 Outputs:
   VPC:
     Description: A reference to the created VPC
