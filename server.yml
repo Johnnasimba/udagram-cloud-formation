@@ -276,10 +276,15 @@ Resources:
         Fn::Base64: !Sub |
           #!/bin/bash
           apt-get update -y
+          apt-get install unzip -y
+          apt-get install wget -y
           apt-get install apache2 -y
           systemctl start apache2.service
           cd /var/www/html
-          echo "it works! Udagram, Udacity" > index.html  
+          wget https://github.com/Johnnasimba/udagram-static-file/archive/refs/heads/master.zip
+          unzip master.zip
+          cp udagram-static-file-master/* index.html
+          rm -rf udagram-static-file-master master.zip
       ImageId: ami-0283a57753b18025b
       SecurityGroups:
         - Ref: WebServerSecGroup
