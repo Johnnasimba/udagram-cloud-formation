@@ -30,6 +30,8 @@ Parameters:
     Description: Private subnet in the second Availability Zone
     Type: String
     Default: 10.0.3.0/24
+
+
 Resources:
   VPC:
     Type: AWS::EC2::VPC
@@ -63,7 +65,7 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: !Join ['', [!Ref EnvironmentName, Public Subnet (AZ1)']]
+          Value: !Sub ${EnvironmentName} Public Subnet (AZ1)
     DependsOn: VPC
 
   PublicSubnet2:
@@ -75,7 +77,7 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: !Join ['', [!Ref EnvironmentName, 'Public Subnet (AZ2)']]
+          Value: !Sub EnvironmentName Public Subnet (AZ2)
     DependsOn: VPC
 
   PrivateSubnet1:
@@ -87,7 +89,7 @@ Resources:
       MapPublicIpOnLaunch: false
       Tags:
         - Key: Name
-          Value: !Join ['', [!Ref EnvironmentName, 'Private Subnet (AZ1)']]
+          Value: !Sub ${EnvironmentName} Private Subnet (AZ1)
 
   PrivateSubnet2:
     Type: AWS::EC2::Subnet
@@ -98,7 +100,8 @@ Resources:
       MapPublicIpOnLaunch: false
       Tags:
         - Key: Name
-          Value: !Join ['', [!Ref EnvironmentName, 'Private Subnet (AZ2)']]
+          Value: !Sub ${EnvironmentName} Private Subnet (AZ2)
+  
   NatGateway1EIP:
     Type: AWS::EC2::EIP
     DependsOn: InternetGatewayAttachment
@@ -127,13 +130,14 @@ Resources:
       SubnetId: !Ref PublicSubnet2
     DependsOn: PublicSubnet2
 
+  # Route tables
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref VPC
       Tags:
         - Key: Name
-          Value: !Join ['', [!Ref EnvironmentName, 'Public Routes']]
+          Value: !Sub ${EnvironmentName} Public Routes
     DependsOn: VPC
 
   DefaultPublicRoute:
@@ -172,7 +176,7 @@ Resources:
       VpcId: !Ref VPC
       Tags:
         - Key: Name
-          Value: !Join [' ', [!Ref EnvironmentName, 'Private Routes (AZ1)']]
+          Value: !Sub ${EnvironmentName} Private Routes (AZ1)
     DependsOn: VPC
 
   DefaultPrivateRoute1:
@@ -200,7 +204,7 @@ Resources:
       VpcId: !Ref VPC
       Tags:
         - Key: Name
-          Value: !Join [' ', [!Ref EnvironmentName, 'Private Routes (AZ2)']]
+          Value: !Sub ${EnvironmentName} Private Routes (AZ2)
     DependsOn: VPC
 
   DefaultPrivateRoute2:
@@ -221,11 +225,14 @@ Resources:
     DependsOn:
       - PrivateRouteTable2
       - PrivateSubnet2
+
+  # Security Groups for the Load Balancer
   LBSecGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Allow http to our load balancer
-      VpcId: !Ref VPC
+      VpcId:
+        Ref: VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 80
@@ -236,25 +243,19 @@ Resources:
           FromPort: 80
           ToPort: 80
           CidrIp: 0.0.0.0/0
-        - IpProtocol: tcp
-          FromPort: 8080
-          ToPort: 8080
-          CidrIp: 0.0.0.0/0
-        - IpProtocol: tcp
-          FromPort: 8080
-          ToPort: 8080
-          CidrIp: 10.0.0.0/8
     DependsOn: VPC
 
+  # Security Groups for the Web Server
   WebServerSecGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Allow http to our hosts and SSH from local only
-      VpcId: !Ref VPC
+      VpcId:
+        Ref: VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
-          FromPort: 8080
-          ToPort: 8080
+          FromPort: 80
+          ToPort: 80
           CidrIp: 0.0.0.0/0
         - IpProtocol: tcp
           FromPort: 22
@@ -266,6 +267,8 @@ Resources:
           ToPort: 65535
           CidrIp: 0.0.0.0/0
     DependsOn: VPC
+
+  # Auto scaling launch configuration
   WebAppLaunchConfig:
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
@@ -285,6 +288,7 @@ Resources:
           usermod -aG docker ubuntu
           docker run -p 8080:8080 tomcat:8.0
       ImageId: ami-0e8ad072b97e68af9
+      KeyName: udacity
       SecurityGroups:
         - Ref: WebServerSecGroup
       InstanceType: t2.micro
@@ -293,12 +297,14 @@ Resources:
           Ebs:
             VolumeSize: '10'
     DependsOn: WebServerSecGroup
+
+  # Auto scaling group
   WebAppGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
       VPCZoneIdentifier:
-        - !Ref PrivateSubnet1
-        - !Ref PrivateSubnet2
+        - Ref: PrivateSubnet1
+        - Ref: PrivateSubnet2
       LaunchConfigurationName:
         Ref: WebAppLaunchConfig
       MinSize: '3'
@@ -310,12 +316,14 @@ Resources:
       - PrivateSubnet2
       - WebAppLaunchConfig
       - WebAppTargetGroup
+
+  # load balancer
   WebAppLB:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
       Subnets:
-        - !Ref PublicSubnet1
-        - !Ref PublicSubnet2
+        - Ref: PublicSubnet1
+        - Ref: PublicSubnet2
       SecurityGroups:
         - Ref: LBSecGroup
     DependsOn:
@@ -323,6 +331,8 @@ Resources:
       - LBSecGroup
       - PublicSubnet1 
       - PublicSubnet2
+
+  # load balancer listener
   Listener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
@@ -343,10 +353,12 @@ Resources:
           TargetGroupArn: !Ref 'WebAppTargetGroup'
       Conditions:
         - Field: path-pattern
-          Values: [ / ]
+          Values: [/]
       ListenerArn: !Ref 'Listener'
       Priority: 1
     DependsOn: Listener
+  
+  # target group
   WebAppTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
@@ -355,11 +367,12 @@ Resources:
       HealthCheckProtocol: HTTP
       HealthCheckTimeoutSeconds: 8
       HealthyThresholdCount: 2
-      Port: 8080
+      Port: 80
       Protocol: HTTP
       UnhealthyThresholdCount: 5
       VpcId: !Ref VPC
     DependsOn: VPC
+
 Outputs:
   VPC:
     Description: A reference to the created VPC

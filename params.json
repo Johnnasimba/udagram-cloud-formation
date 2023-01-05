@@ -1,7 +1,7 @@
 [
 	{
 		"ParameterKey": "EnvironmentName",
-		"ParameterValue": "Udagram2"
+		"ParameterValue": "udagram"
 	},
 	{
     "ParameterKey": "VpcCIDR",
