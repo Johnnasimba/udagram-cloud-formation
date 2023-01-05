@@ -30,6 +30,8 @@ Parameters:
     Description: Private subnet in the second Availability Zone
     Type: String
     Default: 10.0.3.0/24
+
+
 Resources:
   VPC:
     Type: AWS::EC2::VPC
@@ -52,6 +54,7 @@ Resources:
     Properties:
       InternetGatewayId: !Ref InternetGateway
       VpcId: !Ref VPC
+    DependsOn: VPC
 
   PublicSubnet1:
     Type: AWS::EC2::Subnet
@@ -63,6 +66,7 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub ${EnvironmentName} Public Subnet (AZ1)
+    DependsOn: VPC
 
   PublicSubnet2:
     Type: AWS::EC2::Subnet
@@ -73,7 +77,8 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName} Public Subnet (AZ2)
+          Value: !Sub EnvironmentName Public Subnet (AZ2)
+    DependsOn: VPC
 
   PrivateSubnet1:
     Type: AWS::EC2::Subnet
@@ -96,6 +101,7 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub ${EnvironmentName} Private Subnet (AZ2)
+  
   NatGateway1EIP:
     Type: AWS::EC2::EIP
     DependsOn: InternetGatewayAttachment
@@ -113,13 +119,18 @@ Resources:
     Properties:
       AllocationId: !GetAtt NatGateway1EIP.AllocationId
       SubnetId: !Ref PublicSubnet1
+    DependsOn:
+      - PublicSubnet1
+      - NatGateway1EIP
 
   NatGateway2:
     Type: AWS::EC2::NatGateway
     Properties:
       AllocationId: !GetAtt NatGateway2EIP.AllocationId
       SubnetId: !Ref PublicSubnet2
+    DependsOn: PublicSubnet2
 
+  # Route tables
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -127,26 +138,36 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub ${EnvironmentName} Public Routes
+    DependsOn: VPC
 
   DefaultPublicRoute:
     Type: AWS::EC2::Route
-    DependsOn: InternetGatewayAttachment
     Properties:
       RouteTableId: !Ref PublicRouteTable
       DestinationCidrBlock: 0.0.0.0/0
       GatewayId: !Ref InternetGateway
+    DependsOn:
+      - InternetGatewayAttachment
+      - PublicRouteTable
+      - InternetGateway
 
   PublicSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       RouteTableId: !Ref PublicRouteTable
       SubnetId: !Ref PublicSubnet1
+    DependsOn:
+      - PublicRouteTable
+      - PublicSubnet1
 
   PublicSubnet2RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       RouteTableId: !Ref PublicRouteTable
       SubnetId: !Ref PublicSubnet2
+    DependsOn:
+      - PublicRouteTable
+      - PublicSubnet2
 
 
   PrivateRouteTable1:
@@ -156,6 +177,7 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub ${EnvironmentName} Private Routes (AZ1)
+    DependsOn: VPC
 
   DefaultPrivateRoute1:
     Type: AWS::EC2::Route
@@ -163,12 +185,18 @@ Resources:
       RouteTableId: !Ref PrivateRouteTable1
       DestinationCidrBlock: 0.0.0.0/0
       NatGatewayId: !Ref NatGateway1
+    DependsOn:
+      - PrivateRouteTable1
+      - NatGateway1
 
   PrivateSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       RouteTableId: !Ref PrivateRouteTable1
       SubnetId: !Ref PrivateSubnet1
+    DependsOn:
+      - PrivateRouteTable1
+      - PrivateSubnet1
 
   PrivateRouteTable2:
     Type: AWS::EC2::RouteTable
@@ -177,6 +205,7 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub ${EnvironmentName} Private Routes (AZ2)
+    DependsOn: VPC
 
   DefaultPrivateRoute2:
     Type: AWS::EC2::Route
@@ -184,19 +213,26 @@ Resources:
       RouteTableId: !Ref PrivateRouteTable2
       DestinationCidrBlock: 0.0.0.0/0
       NatGatewayId: !Ref NatGateway2
+    DependsOn:
+      - PrivateRouteTable2
+      - NatGateway2
 
   PrivateSubnet2RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       RouteTableId: !Ref PrivateRouteTable2
       SubnetId: !Ref PrivateSubnet2
+    DependsOn:
+      - PrivateRouteTable2
+      - PrivateSubnet2
+
+  # Security Groups for the Load Balancer
   LBSecGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Allow http to our load balancer
       VpcId:
-        Fn::ImportValue:
-          !Sub "${EnvironmentName}-VPCID"
+        Ref: VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 80
@@ -207,17 +243,19 @@ Resources:
           FromPort: 80
           ToPort: 80
           CidrIp: 0.0.0.0/0
+    DependsOn: VPC
+
+  # Security Groups for the Web Server
   WebServerSecGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Allow http to our hosts and SSH from local only
       VpcId:
-        Fn::ImportValue:
-          !Sub "${EnvironmentName}-VPCID"
+        Ref: VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
-          FromPort: 8080
-          ToPort: 8080
+          FromPort: 80
+          ToPort: 80
           CidrIp: 0.0.0.0/0
         - IpProtocol: tcp
           FromPort: 22
@@ -228,52 +266,65 @@ Resources:
           FromPort: 0
           ToPort: 65535
           CidrIp: 0.0.0.0/0
+    DependsOn: VPC
+
+  # Auto scaling launch configuration
   WebAppLaunchConfig:
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash
-          # Install docker
-          apt-get update
-          apt-get install -y apt-transport-https ca-certificates curl software-properties-common
-          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
-          add-apt-repository \
-          "deb [arch=amd64] https://download.docker.com/linux/ubuntu \
-          $(lsb_release -cs) \
-          stable"
-          apt-get update
-          apt-get install -y docker-ce
-          usermod -aG docker ubuntu
-          docker run -p 8080:8080 tomcat:8.0
-      ImageId: ami-0e8ad072b97e68af9
+          apt-get update -y
+          apt-get install apache2 -y
+          systemctl start apache2.service
+          cd /var/www/html
+          echo "it works! Udagram, Udacity" > index.html  
+      ImageId: ami-0283a57753b18025b
       SecurityGroups:
         - Ref: WebServerSecGroup
-      InstanceType: t3.medium
+      InstanceType: t2.micro
       BlockDeviceMappings:
         - DeviceName: "/dev/sdk"
           Ebs:
             VolumeSize: '10'
+    DependsOn: WebServerSecGroup
+
+  # Auto scaling group
   WebAppGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
       VPCZoneIdentifier:
-        - Fn::ImportValue:
-            !Sub "${EnvironmentName}-PRIV-NETS"
+        - Ref: PrivateSubnet1
+        - Ref: PrivateSubnet2
       LaunchConfigurationName:
         Ref: WebAppLaunchConfig
       MinSize: '3'
       MaxSize: '5'
       TargetGroupARNs:
         - Ref: WebAppTargetGroup
+    DependsOn:
+      - PrivateSubnet1
+      - PrivateSubnet2
+      - WebAppLaunchConfig
+      - WebAppTargetGroup
+
+  # load balancer
   WebAppLB:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
       Subnets:
-        - Fn::ImportValue: !Sub "${EnvironmentName}-PUB1-SN"
-        - Fn::ImportValue: !Sub "${EnvironmentName}-PUB2-SN"
+        - Ref: PublicSubnet1
+        - Ref: PublicSubnet2
       SecurityGroups:
         - Ref: LBSecGroup
+    DependsOn:
+      - VPC
+      - LBSecGroup
+      - PublicSubnet1 
+      - PublicSubnet2
+
+  # load balancer listener
   Listener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
@@ -285,6 +336,7 @@ Resources:
         Ref: WebAppLB
       Port: '80'
       Protocol: HTTP
+    DependsOn: WebAppLB
   ALBListenerRule:
     Type: AWS::ElasticLoadBalancingV2::ListenerRule
     Properties:
@@ -293,9 +345,12 @@ Resources:
           TargetGroupArn: !Ref 'WebAppTargetGroup'
       Conditions:
         - Field: path-pattern
-          Values: [ / ]
+          Values: [/]
       ListenerArn: !Ref 'Listener'
       Priority: 1
+    DependsOn: Listener
+  
+  # target group
   WebAppTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
@@ -304,52 +359,55 @@ Resources:
       HealthCheckProtocol: HTTP
       HealthCheckTimeoutSeconds: 8
       HealthyThresholdCount: 2
-      Port: 8080
+      Port: 80
       Protocol: HTTP
       UnhealthyThresholdCount: 5
-      VpcId:
-        Fn::ImportValue:
-          Fn::Sub: "${EnvironmentName}-VPCID"
+      VpcId: !Ref VPC
+    DependsOn: VPC
 
 Outputs:
   VPC:
     Description: A reference to the created VPC
     Value: !Ref VPC
     Export:
-      Name: !Sub ${EnvironmentName}-VPCID
+      Name: !Join ['', [!Ref EnvironmentName, '-VPCID']]
 
   PublicSubnets:
     Description: A list of the public subnets
-    Value: !Join [ ",", [ !Ref PublicSubnet1, !Ref PublicSubnet2 ] ]
+    Value: !Join [ ",", [ !Ref PublicSubnet1, !Ref PublicSubnet2 ]]
     Export:
-      Name: !Sub ${EnvironmentName}-PUB-NETS
+      Name: !Join ['', [!Ref EnvironmentName, '-PUB-NETS']]
 
   PrivateSubnets:
     Description: A list of the private subnets
-    Value: !Join [ ",", [ !Ref PrivateSubnet1, !Ref PrivateSubnet2 ] ]
+    Value: !Join [ ",", [ !Ref PrivateSubnet1, !Ref PrivateSubnet2 ]]
     Export:
-      Name: !Sub ${EnvironmentName}-PRIV-NETS
+      Name: !Join ['', [!Ref EnvironmentName, '-PRIV-NETS']]
 
   PublicSubnet1:
     Description: A reference to the public subnet in the 1st Availability Zone
     Value: !Ref PublicSubnet1
     Export:
-      Name: !Sub ${EnvironmentName}-PUB1-SN
+      Name: !Join ['', [!Ref EnvironmentName, '-PUB1-SN']]
 
   PublicSubnet2:
     Description: A reference to the public subnet in the 2nd Availability Zone
     Value: !Ref PublicSubnet2
     Export:
-      Name: !Sub ${EnvironmentName}-PUB2-SN
+      Name: !Join ['', [!Ref EnvironmentName, '-PUB2-SN']]
 
   PrivateSubnet1:
     Description: A reference to the private subnet in the 1st Availability Zone
     Value: !Ref PrivateSubnet1
     Export:
-      Name: !Sub ${EnvironmentName}-PRI1-SN
+      Name: !Join ['', [!Ref EnvironmentName, '-PRI1-SN']]
 
   PrivateSubnet2:
     Description: A reference to the private subnet in the 2nd Availability Zone
     Value: !Ref PrivateSubnet2
     Export:
-      Name: !Sub ${EnvironmentName}-PRI2-SN
+      Name: !Join ['', [!Ref EnvironmentName, '-PRI2-SN']]
+
+  LoadBalancerUrl:
+    Value: !Join ['', ['http://', !GetAtt WebAppLB.DNSName]]
+    Description: URL of the load balancer
